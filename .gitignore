@@ -2,3 +2,13 @@
 dataset/
 dataset.zip
 datasets.zip
+node_modules
+.next/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store

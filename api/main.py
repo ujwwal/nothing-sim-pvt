@@ -20,7 +20,7 @@ def read_root():
 
 @app.get("/api/data-health")
 def get_data_health():
-    from data_pipeline import MockDataPipeline
+    from api.data_pipeline import MockDataPipeline
     pipeline = MockDataPipeline()
     info = pipeline.inspect_directory()
     
