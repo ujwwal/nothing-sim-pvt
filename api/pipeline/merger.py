@@ -77,7 +77,8 @@ class PipelineMerger:
         df_spm: pd.DataFrame,
         df_pit: pd.DataFrame | None = None,
         df_cdc: pd.DataFrame | None = None,
-        df_vera: pd.DataFrame | None = None,   # stub — needs crosswalk
+        df_vera: pd.DataFrame | None = None,
+        df_crosswalk: pd.DataFrame | None = None,
     ) -> pd.DataFrame:
         """
         Build the merged pipeline DataFrame.
@@ -89,9 +90,11 @@ class PipelineMerger:
         df_pit : pd.DataFrame | None
             Output from load_pit(). Left-joined on (coc_number, year).
         df_cdc : pd.DataFrame | None
-            Output from load_cdc(). Left-joined on (state, year).
+            Output from load_cdc(). Left-joined on (coc_number) after crosswalk aggregation.
         df_vera : pd.DataFrame | None
-            Output from load_vera(). Stub — requires CoC→county crosswalk.
+            Output from load_vera(). Left-joined on (coc_number, year) after crosswalk aggregation.
+        df_crosswalk : pd.DataFrame | None
+            CoC-to-County crosswalk loaded from county_coc_match.csv.
 
         Returns
         -------
@@ -104,6 +107,8 @@ class PipelineMerger:
             validate_loader_output(df_pit, "pit_coc")
         if df_cdc is not None:
             validate_loader_output(df_cdc, "cdc")
+        if df_vera is not None:
+            validate_loader_output(df_vera, "vera")
 
         # --- Start from SPM spine ---
         df = df_spm.copy()
@@ -114,17 +119,23 @@ class PipelineMerger:
         if df_pit is not None:
             df = self._join_pit(df, df_pit)
 
-        # --- Join CDC mortality ---
-        if df_cdc is not None:
-            df = self._join_cdc(df, df_cdc)
-
-        # --- Vera stub ---
-        if df_vera is not None:
+        # --- County-level data requiring crosswalk (Vera, CDC) ---
+        if df_crosswalk is None:
             logger.warning(
-                "Vera join requested but CoC→county crosswalk is not available. "
-                "Vera data will not be merged. Provide a crosswalk file to enable this join."
+                "Crosswalk not provided. Vera and CDC county-level data "
+                "will not be merged into the CoC spine."
             )
-            df = self._flag_rows(df, "vera_join_skipped_no_crosswalk")
+            df = self._flag_rows(df, "county_join_skipped_no_crosswalk")
+        else:
+            # Normalise crosswalk keys
+            df_crosswalk["county_fips"] = df_crosswalk["county_fips"].astype(str).str.strip().str.zfill(5)
+            df_crosswalk["coc_number"] = _normalise_coc(df_crosswalk["coc_number"])
+            
+            if df_vera is not None:
+                df = self._join_vera(df, df_vera, df_crosswalk)
+            
+            if df_cdc is not None:
+                df = self._join_cdc(df, df_cdc, df_crosswalk)
 
         logger.info(
             "Pipeline merge complete: %d CoC×year records, %d columns.",
@@ -172,24 +183,61 @@ class PipelineMerger:
         logger.info("PIT joined: %d columns added.", len(pit_cols) - 2)
         return df
 
-    def _join_cdc(self, df: pd.DataFrame, df_cdc: pd.DataFrame) -> pd.DataFrame:
-        """
-        Left-join CDC mortality data on county_fips.
+    def _aggregate_county_to_coc(
+        self, df_county: pd.DataFrame, df_crosswalk: pd.DataFrame, metric_cols: list[str]
+    ) -> pd.DataFrame:
+        """Apportion county-level metrics to CoCs based on population share."""
+        cw = df_crosswalk[["county_fips", "coc_number", "pct_cnty_pop_coc"]].copy()
+        
+        # Merge data with crosswalk
+        df_joined = df_county.merge(cw, on="county_fips", how="inner")
+        
+        # Apportion metrics
+        for col in metric_cols:
+            if col in df_joined.columns:
+                df_joined[col] = df_joined[col] * (df_joined["pct_cnty_pop_coc"] / 100.0)
+            
+        group_cols = ["coc_number"]
+        # Only group by year if it has actual values (Vera has years, CDC is an aggregate with None)
+        if "year" in df_joined.columns and df_joined["year"].notna().any():
+            group_cols.append("year")
+            
+        return df_joined.groupby(group_cols, as_index=False)[metric_cols].sum()
 
-        NOTE: The current CDC export is a 2018–2024 aggregate with no year
-        column. It is joined on county_fips only. This requires a CoC→county
-        crosswalk (not yet available), so this join is currently a stub that
-        logs a warning and returns the DataFrame unchanged.
+    def _join_vera(
+        self, df: pd.DataFrame, df_vera: pd.DataFrame, df_crosswalk: pd.DataFrame
+    ) -> pd.DataFrame:
+        """Aggregate Vera county data to CoC and left-join on (coc_number, year)."""
+        metrics = ["total_jail_pop", "total_prison_pop"]
+        df_agg = self._aggregate_county_to_coc(df_vera, df_crosswalk, metrics)
+        
+        before = len(df)
+        df = df.merge(df_agg, on=["coc_number", "year"], how="left", suffixes=("", "_vera"))
+        after = len(df)
+        
+        if after != before:
+            logger.warning("Vera join produced %d rows (expected %d).", after, before)
+        logger.info("Vera joined: aggregated county data to CoC level.")
+        return df
 
-        TODO: When the CoC→county crosswalk is available, aggregate CDC
-        county data to CoC level and join on coc_number.
-        """
-        logger.warning(
-            "CDC join skipped: CDC data is county-level with no year column. "
-            "A CoC→county crosswalk is required to aggregate CDC to the CoC "
-            "spine. This will be enabled once the crosswalk file is available."
-        )
-        df = self._flag_rows(df, "cdc_join_skipped_no_crosswalk")
+    def _join_cdc(
+        self, df: pd.DataFrame, df_cdc: pd.DataFrame, df_crosswalk: pd.DataFrame
+    ) -> pd.DataFrame:
+        """Aggregate CDC county data to CoC and left-join on coc_number."""
+        metrics = ["deaths", "population"]
+        df_agg = self._aggregate_county_to_coc(df_cdc, df_crosswalk, metrics)
+        
+        # Recalculate crude rate at the CoC level
+        df_agg["crude_rate"] = (df_agg["deaths"] / df_agg["population"]) * 100000.0
+        
+        # CDC is a 2018-2024 aggregate, so it doesn't have a year. We join on coc_number.
+        before = len(df)
+        df = df.merge(df_agg, on="coc_number", how="left", suffixes=("", "_cdc"))
+        after = len(df)
+        
+        if after != before:
+            logger.warning("CDC join produced %d rows (expected %d).", after, before)
+        logger.info("CDC joined: aggregated static county data to CoC level.")
         return df
 
     @staticmethod
@@ -264,6 +312,7 @@ def build_pipeline(
     from api.loaders.spm_loader import load_spm
     from api.loaders.pit_loader import load_pit
     from api.loaders.cdc_loader import load_cdc
+    from api.loaders.vera_loader import load_vera
 
     kwargs: dict[str, Any] = {}
     if datasets_dir:
@@ -282,5 +331,24 @@ def build_pipeline(
     except Exception as exc:
         logger.warning("CDC load failed — merging without CDC data: %s", exc)
         df_cdc = None
+        
+    try:
+        # We only need 2022 and 2023 for Vera currently (to match PIT/SPM generally available years)
+        # However, passing no args defaults to all available in the loader.
+        df_vera = load_vera(**kwargs)
+    except Exception as exc:
+        logger.warning("Vera load failed — merging without Vera data: %s", exc)
+        df_vera = None
 
-    return PipelineMerger().build(df_spm=df_spm, df_pit=df_pit, df_cdc=df_cdc)
+    df_crosswalk = None
+    cw_path = Path(kwargs.get("datasets_dir", "datasets")) / "county_coc_match.csv"
+    if cw_path.exists():
+        try:
+            df_crosswalk = pd.read_csv(cw_path, encoding="latin-1", dtype={"county_fips": str})
+            logger.info("Loaded CoC-to-County crosswalk.")
+        except Exception as exc:
+            logger.warning("Failed to load crosswalk: %s", exc)
+
+    return PipelineMerger().build(
+        df_spm=df_spm, df_pit=df_pit, df_cdc=df_cdc, df_vera=df_vera, df_crosswalk=df_crosswalk
+    )
