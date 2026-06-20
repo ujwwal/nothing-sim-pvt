@@ -71,14 +71,6 @@ export default function LandingPage() {
 
       {/* ── Hero ────────────────────────────────────────────────────────── */}
       <section className="pt-8 flex flex-col items-center text-center">
-        {/* Badge */}
-        <motion.div {...fadeIn(0.1)}>
-          <span className="badge badge-blue mb-8 inline-flex items-center gap-1.5">
-            <span className="pulse-dot bg-blue-400 w-1.5 h-1.5" />
-            USAII Global AI Hackathon 2026 · Challenge 6
-          </span>
-        </motion.div>
-
         {/* Headline */}
         <motion.h1
           {...fadeUp(0.15)}
