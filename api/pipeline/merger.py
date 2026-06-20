@@ -32,7 +32,7 @@ from typing import Any
 
 import pandas as pd
 
-from api.pipeline.schema import validate_loader_output
+from pipeline.schema import validate_loader_output
 
 logger = logging.getLogger(__name__)
 
@@ -261,9 +261,9 @@ def build_pipeline(
     - NHGIS join is deferred (blocked by same crosswalk requirement as Vera).
     """
     # Import here to avoid circular imports at module level
-    from api.loaders.spm_loader import load_spm
-    from api.loaders.pit_loader import load_pit
-    from api.loaders.cdc_loader import load_cdc
+    from loaders.spm_loader import load_spm
+    from loaders.pit_loader import load_pit
+    from loaders.cdc_loader import load_cdc
 
     kwargs: dict[str, Any] = {}
     if datasets_dir:

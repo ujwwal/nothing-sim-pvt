@@ -53,7 +53,7 @@ The platform is a full-stack Next.js + FastAPI web application with a dark glass
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Frontend                             │
+│                 Frontend (Vercel)                           │
 │          Next.js 15 · React 19 · TypeScript                 │
 │  ┌──────────┐  ┌──────────┐  ┌────────────┐  ┌──────────┐  │
 │  │  /home   │  │ /simulate│  │ /dashboard │  │/data-hlth│  │
@@ -62,7 +62,7 @@ The platform is a full-stack Next.js + FastAPI web application with a dark glass
 └─────────────────────┼───────────────────────────────────────┘
                       │
 ┌─────────────────────▼───────────────────────────────────────┐
-│                     Backend (FastAPI)                       │
+│              Backend (Hugging Face Spaces)                  │
 │  ┌─────────────────────────────────────────────────────┐   │
 │  │  Data Pipeline (builds once at startup)             │   │
 │  │  HUD PIT Count → TransitionCalibrator → per-CoC     │   │
@@ -245,6 +245,38 @@ App available at: **http://localhost:3000**
 ### Windows: One-Click Launch
 
 Use the provided `launch.bat` to start both servers simultaneously.
+
+---
+
+## Production Deployment
+
+### 1. Deploy the Backend to Hugging Face Spaces
+
+The backend API is deployed as a Docker space on Hugging Face.
+
+1. Ensure you have the `huggingface_hub` Python package installed.
+2. Authenticate using `huggingface-cli login`.
+3. Go to your Hugging Face Space settings and add your private dataset token as the `HF_TOKEN` secret.
+4. Run the upload script from the project root to push the `api/` folder:
+
+```bash
+python upload_space.py
+```
+
+### 2. Deploy the Frontend to Vercel
+
+The frontend is a standard Next.js application hosted on Vercel.
+
+1. Install the Vercel CLI: `npm i -g vercel`.
+2. Link your project to Vercel using `vercel link`.
+3. Make sure to configure the Vercel environment variables:
+   - `BACKEND_URL`: Set this to the URL of your Hugging Face Space (e.g., `https://ujwwal-quietcost-api.hf.space`).
+   - `NEXT_PUBLIC_GEMINI_API_KEY`: Set this to your Gemini API key.
+4. Deploy the project:
+
+```bash
+vercel deploy --prod
+```
 
 ---
 

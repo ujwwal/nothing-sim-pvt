@@ -3,7 +3,7 @@ datasets/
 datasets.zip
 
 # Python API — deployed separately on Railway
-api/
+/api/
 
 # Python env
 *.pyc

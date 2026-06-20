@@ -153,8 +153,8 @@ class TransitionCalibrator:
 
     Usage::
 
-        from api.pipeline.merger import build_pipeline
-        from api.calibration.transition_calibrator import TransitionCalibrator
+        from pipeline.merger import build_pipeline
+        from calibration.transition_calibrator import TransitionCalibrator
 
         df = build_pipeline()
         calibrator = TransitionCalibrator(df)

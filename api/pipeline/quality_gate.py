@@ -26,7 +26,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from api.pipeline.schema import CRITICAL_FIELDS
+from pipeline.schema import CRITICAL_FIELDS
 
 logger = logging.getLogger(__name__)
 
